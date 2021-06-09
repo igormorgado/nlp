@@ -16,19 +16,22 @@ nltk.download('punkt')
 
 #%%
 def sentence_to_ngram(tokenized_sentence, ngram_order=2):
+    """Convert a sentence to a list n-grams order n"""
     assert ngram_order <= len(tokenized_sentence)
     ngram = []
     for i in range(len(tokenized_sentence) - ngram_order + 1):
         ngram.append(tokenized_sentence[i:i+ngram_order])
     return ngram
 
+
 #%%
-def preprocess_ngram_sentence(tokenized_sentence, ngram_order=2):
-    return ["<s>"] * (ngram_order-1) + tokenized_sentence + ["</s>"]
+def preprocess_ngram_sentence(tokenized_sentence, ngram_order=2, start_token="<s>", end_token="</s>"):
+    """ Add initial and end of sentnece tags"""
+    return [start_token] * (ngram_order-1) + tokenized_sentence + [end_token]
 
 #%%
 def pretty_print_ngram(tokenized_sentence, ngram_order=2, normalize=True):
-
+    """ Pretty pring a list of ngrams"""
     largest_word = max([ len(w) for w in tokenized_sentence])
     digits = len(str(len(tokenized_sentence)))
 
@@ -96,6 +99,7 @@ def single_pass_trigram_count_matrix(corpus):
 
 #%% Smoothing
 def add_k_smooting_probability(k, vocabulary_size, n_gram_count, n_gram_prefix_count):
+    """Apply k smoothing"""
     numerator = n_gram_count + k
     denominator = n_gram_prefix_count + k * vocabulary_size
     return numerator/denominator
@@ -103,7 +107,7 @@ def add_k_smooting_probability(k, vocabulary_size, n_gram_count, n_gram_prefix_c
 #%% Language model evaluation
 def train_validation_test_split(data, train_percent, validation_percent, seed=87, shuffle=True):
     """
-    SPlits the input data to train/validation/test according to the percentage
+    Splits the input data to train/validation/test according to the percentage
 
     Input:
     data: Preprocesses and tokenized corpus as list of sentences
@@ -137,10 +141,12 @@ def train_validation_test_split(data, train_percent, validation_percent, seed=87
 
 #%% Split sentences
 def split_to_sentences(data):
+    """Helper to siply split a sentence"""
     return data.strip().split('\n')
 
 #%%
 def tokenize_sentences(sentences):
+    """Convert a sentence to  list of NLP tokens"""
     return [ re.findall(r"[\w']+|[.,!?;<=>]", s.lower()) for s in sentences ]
 
 #%% More "professional"
@@ -149,168 +155,242 @@ def split_to_sentences_nltk(data):
     return sentence_detector.tokenize(data.strip())
 
 def tokenize_sentences_nltk(sentences):
+    """Convert a sentence to  list of NLP tokens """
     # Missing better handling of tweeter tags, user marks and symbols
     return [nltk.word_tokenize(s.lower()) for s in sentences]
 
 #%%
 def get_tokenized_data(data):
+    """Convert raw data into tokenized sentences"""
     return tokenize_sentences(split_to_sentences(data))
 
 #%%
 def count_words(data):
+    """Count words in a tokenized list of sentences"""
     return Counter([ word for sentence in data for word in sentence])
 
 #%%
 def get_words_with_nplus_frequency(tokenized_sentences, count_threshold):
+    """Filter a frequency dictionay to ocurrencer above or equal count_threshold"""
     word_frequencies = count_words(tokenized_sentences)
     word_frequencies_filtered = dict(filter(lambda x: x[1] >= count_threshold, word_frequencies.items()))
     return list(word_frequencies_filtered.keys())
 
 #%%
 def replace_oov_words_by_unk(tokenized_sentences, vocabulary, unknown_token="<unk>"):
+    """Replace OOV words by unknown token"""
     vocabulary = set(vocabulary)
     return [[ word if word in vocabulary else unknown_token for word in sentences] for sentences in tokenized_sentences ]
 
 #%%
 def preprocess_data(train_data, test_data, count_threshold):
+    """Filter train/test data based on frequency threshold"""
     vocabulary = get_words_with_nplus_frequency(train_data, count_threshold)
     train_data_pp = replace_oov_words_by_unk(train_data, vocabulary)
     test_data_pp = replace_oov_words_by_unk(test_data, vocabulary)
     return train_data_pp, test_data_pp, vocabulary
 
-#%%
-# ##########################################
-#
-# PREDICTOR
-#
-# ##########################################
+#%% # Language Model
+def count_n_grams(data, n, start_token='<s>', end_token = '<e>'):
+    """Count all n-grams in dataframe
+    Input:
+        data: list of lists of words
+        n: ngram order
+    Returns:
+        Dicionary that maps ngram to frequency
+    """
+    n_grams = {}
+
+    for sentence in data:
+        sentence = (n) * [start_token] + sentence + [end_token]
+        sentence = tuple(sentence)
+        for i in range(len(sentence) - n + 1):
+            n_gram = tuple(sentence[i:i+n])
+            if n_gram in n_grams:
+                n_grams[n_gram] += 1
+            else:
+                n_grams[n_gram] = 1
+
+    return n_grams
 
 #%%
-# ##########################################
-# Preprocessing
-# ##########################################
+def estimate_probability(word,
+                         previous_n_gram,
+                         n_gram_counts,
+                         n_plus1_gram_counts,
+                         vocabulary_size,
+                         k=1.0):
+    """Estimate probabilities of a next word using the n-gram counts
+    with k-Smoothing
 
-#%% Read data
-with open("data/en_US.twitter.txt", "r") as fd:
-    data = fd.read()
+    Input:
+        word: next word
+        previous_n_gram: Dicitonar of counts of n-grams
+        n_plus1_gram_counts: dictionary of counts of (n+1)-grams
+        vocabulary_size: number of words in vocabulary
+        k: positive constant, smoothing parameter
+    """
+    previous_n_gram = tuple(previous_n_gram)
+    previous_n_gram_count = n_gram_counts.get(previous_n_gram, 0)
+    denominator = previous_n_gram_count + vocabulary_size * k
+    n_plus1_gram = tuple(list(previous_n_gram) + [word])
+    n_plus1_gram_count = n_plus1_gram_counts.get(n_plus1_gram, 0)
+    numerator = n_plus1_gram_count + k
+    probability = numerator / denominator
+    return probability
 
 #%%
-train_data, _, test_data = train_validation_test_split(get_tokenized_data(data), 80, 0, seed=87, shuffle=True)
+def estimate_probabilities(previous_n_gram,
+                             n_gram_counts,
+                             n_plus1_gram_counts,
+                             vocabulary,
+                             k=1.0):
+    """Estimates probabilities of a list of words given a previous_ngram"""
+    previous_n_gram = tuple(previous_n_gram)
+    vocabulary = vocabulary + [ "<e>", "<unk>"]
+    vocabulary_size = len(vocabulary)
+
+    probabilities = {}
+    for word in vocabulary:
+        probability = estimate_probability(word,
+                                           previous_n_gram,
+                                           n_gram_counts,
+                                           n_plus1_gram_counts,
+                                           vocabulary_size,
+                                           k=k)
+        probabilities[word] = probability
+
+    return probabilities
 
 #%%
-minimum_freq = 2
-train_data_processed, test_data_processed, vocabulary = preprocess_data(train_data, test_data, minimum_freq)
+def make_count_matrix(n_plus1_gram_counts, vocabulary):
+    """Add <e> <unk> to the vocabulary, <s> is omitted
+    since it should not appear as the neext word_length"""
+    vocabulary = vocabulary + ["<e>", "<unk>" ]
 
+    n_grams = []
+    for n_plus1_gram in n_plus1_gram_counts.keys():
+        n_gram = n_plus1_gram[0:-1]
+        n_grams.append(n_gram)
+
+    n_grams = list(set(n_grams))
+
+    row_index = { n_gram:i for i, n_gram in enumerate(n_grams)}
+    col_index = { word: j for j, word in enumerate(vocabulary)}
+
+    nrow = len(n_grams)
+    ncol = len(vocabulary)
+    count_matrix = np.zeros((nrow, ncol))
+    for n_plus1_gram, count in n_plus1_gram_counts.items():
+        n_gram = n_plus1_gram[0:-1]
+        word = n_plus1_gram[-1]
+        if word not in vocabulary:
+            continue
+        i = row_index[n_gram]
+        j = col_index[word]
+        count_matrix[i, j] = count
+
+    count_matrix = pd.DataFrame(count_matrix, index=n_grams, columns=vocabulary)
+
+    return count_matrix
 
 #%%
-# ##########################################
-# Language Model
-# ##########################################
+def make_probability_matrix(n_plus1_gram_counts, vocabulary, k):
+    """Builder to a probability matrix"""
+    count_matrix = make_count_matrix(n_plus1_gram_counts, unique_words)
+    count_matrix += k
+    prob_matrix = count_matrix.div(count_matrix.sum(axis=1), axis=0)
+    return prob_matrix
 
 #%%
+def calculate_perplexity(sentence, n_gram_counts, n_plus1_gram_counts, vocabulary_size, k=1.0):
+    """Calculate perplexity for a list of sentences
 
-# #%%
-# word_length = [[(w, len(w))  for w in sentence ] for sentence in tokenized]
-# word_length_flat = [(w, len(w))  for sentence in tokenized for w in sentence]
-#
-# #%%
-# ngram_order = 5
-# ngrams = [sentence_to_ngram(preprocess_ngram_sentence(sentence, ngram_order), ngram_order) for sentence in tokenized]
-#
-# #%%
-# pretty_print_ngram(tokenized[0], 3)
-#
-# #%%
-# count_matrix = single_pass_trigram_count_matrix(tokenized[1])
-# bigrams =  count_matrix.index.to_list()
-# vocabulary = count_matrix.columns.to_list()
-#
-# #%% Probability matrix
-# row_sums = count_matrix.sum(axis=1)
-# prob_matrix = count_matrix.div(row_sums, axis=0)
-#
-# #%% Check probabilities
-# trigram = ('i', 'am', 'happy')
-# bigram = trigram[:-1]
-# word = trigram[-1]
-# trigram_probability = prob_matrix[word][bigram]
-#
-# #%% lists all words in vocabulary starting with a given prefix
-# vocabulary = ['i', 'am', 'happy', 'because', 'learning', '.', 'have', 'you', 'seen','it', '?']
-# starts_with = 'ha'
-# words_ha = [ w for w in vocabulary if w.startswith(starts_with) ]
-#
-#
-# #%% Perplexity
-# # to calculate the exponent, use the following syntax
-# # M here is the product of all probabilities of bigrams(Wi|Wi-1)
-# p = 10 ** (-250)
-# M = 100
-# perplexity = p ** (-1/M)
-# print(perplexity)
-#
-#
-# #%% Target Vocab size
-# M = 3
-# word_counts = {'happy': 5,
-#                'because': 3,
-#                'i': 2,
-#                'am': 2,
-#                'learning': 3,
-#                '.': 1}
-#
-# #%%
-# vocabulary = dict(Counter(word_counts).most_common(M))
-# sentence = ['am', 'i', 'learning']
-# output_sentence = [ w if w in vocabulary else '<UNK>' for w in sentence ]
-#
-# #%%
-# training_set = ['i', 'am', 'happy', 'because','i', 'am', 'learning', '.']
-# training_set_unk = ['i', 'am', '<UNK>', '<UNK>','i', 'am', '<UNK>', '<UNK>']
-#
-# test_set = ['i', 'am', 'learning']
-# test_set_unk = ['i', 'am', '<UNK>']
-#
-# M = len(test_set)
-# probability = 1
-# probability_unk = 1
-#
-# #%% pre-calculated probabilities
-# bigram_probabilities = {('i', 'am'): 1.0, ('am', 'happy'): 0.5, ('happy', 'because'): 1.0, ('because', 'i'): 1.0, ('am', 'learning'): 0.5, ('learning', '.'): 1.0}
-# bigram_probabilities_unk = {('i', 'am'): 1.0, ('am', '<UNK>'): 1.0, ('<UNK>', '<UNK>'): 0.5, ('<UNK>', 'i'): 0.25}
-#
-# #%% Calculate bigram probabiliites
-# for i in range(len(test_set) - 2 + 1):
-#     bigram = tuple(test_set[i:i+2])
-#     probability *= bigram_probabilities[bigram]
-#
-#     bigram_unk = tuple(test_set_unk[i:i+2])
-#     probability_unk *= bigram_probabilities_unk[bigram_unk]
-#
-#
-# #%% Perplexity
-# perplexity = probability ** (-1/M)
-# perplexity_unk = probability_unk ** (-1/M)
-#
-#
-# #%%
-# trigram_probabilities = {('i', 'am', 'happy') : 2}
-# bigram_probabilities = {( 'am', 'happy') : 10}
-# vocabulary_size = 5
-# k = 1
-#
-# #%%
-#
-# probability_known_trigram = add_k_smooting_probability(k, vocabulary_size, trigram_probabilities[('i', 'am', 'happy')],
-#                            bigram_probabilities[( 'am', 'happy')])
-#
-# probability_unknown_trigram = add_k_smooting_probability(k, vocabulary_size, 0, 0)
-# #%%
-#
-# print(f"probability_known_trigram: {probability_known_trigram}")
-# print(f"probability_unknown_trigram: {probability_unknown_trigram}")
-#
-# #%% Backoff
+    Input:
+        Sentence: list of strings
+        n_gram_counts: Dictionarry of counts of n-grams
+        n_plus1_gram_counts: Dictionary of counts of (n+1)-grams
+        vocabulary_size: number of unique words in the vocabulary
+        k: positive smnoothing
+
+    Returns:
+        Perplexity score
+    """
+    n = len(list(n_gram_counts.keys())[0])
+    sent = n * ["<s>"]  + sentence + ["<e>"]
+    sent = tuple(sent)
+    N = len(sent)
+    product_pi = 1.0
+
+    for t in range(n, N):
+        word = sent[t]
+        n_gram = sent[t-n:t]
+        probability =  estimate_probability(word, n_gram, n_gram_counts, n_plus1_gram_counts, vocabulary_size, k=k)
+        product_pi *= probability
+
+    perplexity = product_pi ** (-1/N)
+
+    return perplexity
+
+#%%
+def suggest_a_word(previous_tokens, n_gram_counts, n_plus1_gram_counts, vocabulary, k=1.0, start_with=None):
+    """Get suggestion for a next words
+
+    Input:
+    previous_tokens: The sentence you input where each token is a word. Must have length > n
+    n_gram_counts: Dictionary of counts of n-grams
+    n_plus1_gram_counts: Dictionary of counts of (n+1) -grams
+    vocabulary: list of words
+    k: smoothing thermal
+    start_with: If not none, filter suggest words starting with this string
+
+    Returns:
+    tuple: (string of most likely next word, probability)
+    """
+    n = len(list(n_gram_counts.keys())[0])
+
+    previous_n_gram = previous_tokens[-n:]
+    probabilities = estimate_probabilities(previous_n_gram,
+                                           n_gram_counts,
+                                           n_plus1_gram_counts,
+                                           vocabulary,
+                                           k)
+
+    suggestion = None
+    max_prob = 0
+
+    for word, prob in probabilities.items():
+
+        if start_with is not None:
+            if not word.startswith(start_with):
+                continue
+
+        if prob > max_prob:
+            max_prob = prob
+            suggestion = word
+
+    return suggestion, max_prob
+
+#%%
+def get_suggestions(previous_tokens, n_gram_counts_list, vocabulary, k=1.0, start_with=None):
+    """Return a list of suggestions"""
+    model_counts = len(n_gram_counts_list)
+    suggestions = []
+    for i in range(model_counts-1):
+        n_gram_counts = n_gram_counts_list[i]
+        n_plus1_gram_counts = n_gram_counts_list[i+1]
+
+        suggestion = suggest_a_word(previous_tokens, n_gram_counts,
+                                    n_plus1_gram_counts, vocabulary,
+                                    k=k, start_with=start_with)
+        suggestions.append(suggestion)
+    return suggestions
+
+
+# ####################################################
+# #%% TODO: FUNCTION FOR THIS -->  Backoff Techniqu
+# ####################################################
+
 # trigram_probabilities = {('i', 'am', 'happy') : 0}
 # bigram_probabilities = {( 'am', 'happy') : 0.3}
 # unigram_probabilities = {'happy' : 0.4}
@@ -348,8 +428,9 @@ train_data_processed, test_data_processed, vocabulary = preprocess_data(train_da
 # #%%
 # print(f"probability for trigram {trigram} estimated as {probability_hat_trigram}")
 #
-#
-# #%% Interpolation
+# ####################################################
+# #%% TODO: FUNCTION FOR THIS --> Interpolation technique
+# ####################################################
 # bigram_probabilities = {( 'am', 'happy') : 0.3}
 # trigram_probabilities = {('i', 'am', 'happy') : 0.15}
 # unigram_probabilities = {'happy' : 0.4}
@@ -368,7 +449,7 @@ train_data_processed, test_data_processed, vocabulary = preprocess_data(train_da
 # #%%
 # print(f"besides the trigram {trigram} we also use bigram {bigram} and unigram ({unigram})\n")
 #
-# #%%
+# #%% \sum_lambda == 1
 # probability_hat_trigram = lambda_1 * trigram_probabilities[trigram] \
 #                         + lambda_2 *  bigram_probabilities[bigram] \
 #                         + lambda_3 * unigram_probabilities[unigram]
@@ -376,3 +457,80 @@ train_data_processed, test_data_processed, vocabulary = preprocess_data(train_da
 # #%%
 # print(f"estimated probability of the input trigram {trigram} is {probability_hat_trigram}")
 #
+
+
+#%% Preprocessing
+with open("data/en_US.twitter.txt", "r") as fd:
+    data = fd.read()
+
+#%%
+train_data, _, test_data = train_validation_test_split(get_tokenized_data(data), 80, 0, seed=87, shuffle=True)
+
+#%%
+minimum_freq = 2
+train_data_processed, test_data_processed, vocabulary = preprocess_data(train_data, test_data, minimum_freq)
+
+#%% TEST SUGGESTION MECHANISM
+sentences = [['i', 'like', 'a', 'cat'],
+             ['this', 'dog', 'is', 'like', 'a', 'cat']]
+unique_words = list(set(sentences[0] + sentences[1]))
+unigram_counts  = count_n_grams(sentences, 1)
+bigram_counts   = count_n_grams(sentences, 2)
+trigram_counts  = count_n_grams(sentences, 3)
+quadgram_counts = count_n_grams(sentences, 4)
+qintgram_counts = count_n_grams(sentences, 5)
+
+n_gram_counts_list = [unigram_counts, bigram_counts, trigram_counts, quadgram_counts, qintgram_counts]
+
+#%% Test 1: Bigrams
+previous_tokens = ["i", "like"]
+tmp_suggest1 = suggest_a_word(previous_tokens, unigram_counts, bigram_counts, unique_words, k=1.0)
+print(f"The previous words are 'i like',\n\tand the suggested word is `{tmp_suggest1[0]}` with a probability of {tmp_suggest1[1]:.4f}")
+
+#%% Test2: Bigrams + starts with
+tmp_starts_with = 'c'
+tmp_suggest2 = suggest_a_word(previous_tokens, unigram_counts, bigram_counts, unique_words, k=1.0, start_with=tmp_starts_with)
+print(f"The previous words are 'i like', the suggestion must start with `{tmp_starts_with}`\n\tand the suggested word is `{tmp_suggest2[0]}` with a probability of {tmp_suggest2[1]:.4f}")
+
+#%% Test3: Multiple n-grams
+previous_tokens = ["i", "like"]
+tmp_suggest3 = get_suggestions(previous_tokens, n_gram_counts_list, unique_words, k=1.0)
+print(f"The previous words are 'i like', the suggestions are:")
+display(tmp_suggest3)
+
+#%% Test4: Variable length
+n_gram_counts_list = []
+for n in range(1, 6):
+    print("Computing n-gram counts with n =", n, "...")
+    n_model_counts = count_n_grams(train_data_processed, n)
+    n_gram_counts_list.append(n_model_counts)
+
+#%%
+previous_tokens = ["i", "am", "to"]
+tmp_suggest4 = get_suggestions(previous_tokens, n_gram_counts_list, vocabulary, k=1.0)
+print(f"The previous words are {previous_tokens}, the suggestions are:")
+display(tmp_suggest4)
+
+#%%
+previous_tokens = ["i", "want", "to", "go"]
+tmp_suggest5 = get_suggestions(previous_tokens, n_gram_counts_list, vocabulary, k=1.0)
+print(f"The previous words are {previous_tokens}, the suggestions are:")
+display(tmp_suggest5)
+
+#%%
+previous_tokens = ["hey", "how", "are"]
+tmp_suggest6 = get_suggestions(previous_tokens, n_gram_counts_list, vocabulary, k=1.0)
+print(f"The previous words are {previous_tokens}, the suggestions are:")
+display(tmp_suggest6)
+
+#%%
+previous_tokens = ["hey", "how", "are", "you"]
+tmp_suggest7 = get_suggestions(previous_tokens, n_gram_counts_list, vocabulary, k=1.0)
+print(f"The previous words are {previous_tokens}, the suggestions are:")
+display(tmp_suggest7)
+
+#%%
+previous_tokens = ["hey", "how", "are", "you"]
+tmp_suggest8 = get_suggestions(previous_tokens, n_gram_counts_list, vocabulary, k=1.0, start_with="d")
+print(f"The previous words are {previous_tokens}, the suggestions are:")
+display(tmp_suggest8)
