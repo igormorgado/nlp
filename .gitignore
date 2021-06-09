@@ -1,3 +1,12 @@
 __pycache__/
 *png
 OFF/
+data/GoogleNews-vectors-negative300.bin
+data/en_embeddings_subset.p
+data/fr_embeddings_subset.p
+data/Sarcasm_Headlines_Dataset.json
+data/Sarcasm_Headlines_Dataset_v2.json
+data/WSJ_02-21.pos
+data/WSJ_24.pos
+data/wiki.fr.vec
+data/sarcasm.json
