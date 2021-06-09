@@ -1,0 +1,10 @@
+pip
+ipython
+ipdb
+wheel
+python-poppler
+numpy
+pandas
+matplotlib
+google-ngram-downloader
+tensorflow

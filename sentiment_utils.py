@@ -8,11 +8,22 @@ from nltk.corpus import stopwords
 from nltk.stem import LancasterStemmer, PorterStemmer
 from nltk.tokenize import TweetTokenizer
 
-#%%  Helper functions
+#%%
+def calculate_total_prob(probs):
+    tot = {}
+    for (word, kls), value in probs.items():
+        if kls in tot:
+            tot[kls] += value
+        else:
+            tot[kls] = value
+
+    return tot
+
+#%%  Helper functions for logistic regression
 def process_tweet(tweet):
-    #  stemmer = PorterStemmer()
-    #  stopwords_en = stopwords.words('english')
-    # Replacee misleading smiley
+    stemmer = PorterStemmer()
+    stopwords_en = stopwords.words('english')
+    # Replace misleading smiley
     tweet = re.sub(r': \)', ':)', tweet)
     tweet = re.sub(r': \(', ':(', tweet)
     # Remove stock market tickers.
@@ -25,17 +36,19 @@ def process_tweet(tweet):
     tweet = re.sub(r'[\w\.-]+@[\w\.-]+(?:\.[\w]+)+', '', tweet)
     # Remove hash tag sign
     tweet = re.sub(r'#', '', tweet)
-    #  # Tokenizer
+    # Tokenizer
     tokenizer = TweetTokenizer(preserve_case=False,
                                strip_handles=True,
                                reduce_len=True)
     tweet_tokens = tokenizer.tokenize(tweet)
-    # # Stemming
-    # tweet_tokens = [ stemmer.stem(tt) for tt in tweet_tokens if (tt not in string.punctuation and tt not in stopwords_en) ]
-    tweet_tokens = [ tt for tt in tweet_tokens if tt not in string.punctuation ]
+    # Stemming
+    tweet_tokens = [ stemmer.stem(tt) for tt in tweet_tokens if (tt not in string.punctuation and tt not in stopwords_en) ]
+    # NO STEMMING/STOPWORDS HERE #  tweet_tokens = [ tt for tt in tweet_tokens if tt not in string.punctuation ]
+    #tweet_tokens = [ tt for tt in tweet_tokens if tt not in string.punctuation ]
 
     return tweet_tokens
 
+#%%
 def build_freqs(tweets, ys):
     """Build frequencies.
     Input:
@@ -54,19 +67,17 @@ def build_freqs(tweets, ys):
     # Start with an empty dictionary and populate it by looping over all tweets
     # and over all processed words in each tweet.
     freqs = {}
-    tot = { 1:0, 0:0 }
     for y, tweet in zip(yslist, tweets):
         for word in process_tweet(tweet):
             pair = (word, y)
-            tot[y] +=1
             if pair in freqs:
                 freqs[pair] += 1
             else:
                 freqs[pair] = 1
 
-    return freqs,tot[1],tot[0]
+    return freqs
 
-
+#%%
 def build_freqs_igu(tweets, labels):
     """ Build frequencies:
     Input:
@@ -90,3 +101,6 @@ def extract_features(tweet, freqs):
         pos += freqs.get((word, 1), 0)
         neg += freqs.get((word, 0), 0)
     return np.array([1, pos, neg], dtype=float)
+
+#%% Helper functions for all.
+
