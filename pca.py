@@ -23,14 +23,15 @@ def compute_pca(X, n_components=2):
     X_reduced = np.real(np.dot(X, eigen_vecs_subset.T))
     return X_reduced
 
-#%% Testing your function
-np.random.seed(1)
-X = np.random.rand(3, 10)
-X_reduced = compute_pca(X, n_components=2)
-print("Your original matrix was " + str(X.shape) + " and it became:")
-print(X_reduced)
+if __name__ == "__main__":
+    #%% Testing your function
+    np.random.seed(1)
+    X = np.random.rand(3, 10)
+    X_reduced = compute_pca(X, n_components=2)
+    print("Your original matrix was " + str(X.shape) + " and it became:")
+    print(X_reduced)
 
-#%%
-fig, ax = plt.subplots(figsize=(8,8))
-ax.scatter(X_reduced[:,0], X_reduced[:,1])
-fig.show()
+    #%%
+    fig, ax = plt.subplots(figsize=(8,8))
+    ax.scatter(X_reduced[:,0], X_reduced[:,1])
+    fig.show()
