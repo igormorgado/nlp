@@ -14,7 +14,7 @@ import numpy as np
 
 tokenizer = Tokenizer()
 
-data = open('./irish-lyrics-eof.txt').read()
+data = open('data/irish-lyrics-eof.txt').read()
 
 corpus = data.lower().split("\n")
 
@@ -44,7 +44,7 @@ ys = tf.keras.utils.to_categorical(labels, num_classes=total_words)
 
 #%%
 print(tokenizer.word_index['in'])
-pint(tokenizer.word_index['the'])
+print(tokenizer.word_index['the'])
 print(tokenizer.word_index['town'])
 print(tokenizer.word_index['of'])
 print(tokenizer.word_index['athy'])

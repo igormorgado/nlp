@@ -10,7 +10,7 @@ import numpy as np
 #%% Pre-processing
 tokenizer = Tokenizer()
 
-data = open('./irish-lyrics-eof.txt').read()
+data = open('data/irish-lyrics-eof.txt').read()
 
 corpus = data.lower().split("\n")
 

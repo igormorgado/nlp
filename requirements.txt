@@ -3,8 +3,9 @@ ipython
 ipdb
 wheel
 python-poppler
-numpy
+numpy==1.19.3
 pandas
 matplotlib
 google-ngram-downloader
 tensorflow
+trax
